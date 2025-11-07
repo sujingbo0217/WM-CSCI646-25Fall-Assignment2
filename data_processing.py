@@ -1,25 +1,31 @@
-import torch
-from torch import nn
 import pandas as pd
 import re
-import matplotlib.pyplot as plt
-import numpy as np
 import json
 from collections import Counter
+import argparse
 
 
 '''step 1: read the raw data'''
 
 
-def _read_data():
+def _read_data(train_data_raw: str, test_data_raw: str):
     # -------------------------------------------
     # read the training and test data from files
     # *** complete the code below ***
     # -------------------------------------------
-    train_data =
-    test_data =
+    try:
+        train_raw_data = pd.read_csv(train_data_raw, encoding='utf-8')
+    except Exception as e:
+        print("Error reading training_raw_data.csv:", e)
+        raise
 
-    return train_data, test_data
+    try:
+        test_raw_data = pd.read_csv(test_data_raw, encoding='utf-8')
+    except Exception as e:
+        print("Error reading test_raw_data.csv:", e)
+        raise
+
+    return train_raw_data, test_raw_data
 
 
 '''step 2: data preprocessing'''
@@ -32,7 +38,8 @@ def _data_preprocessing(input_data):
     # ----------------------------------------------------
     # complete code below to convert words to lower case
     # ----------------------------------------------------
-    input_data['clean_text'] =
+    input_data['clean_text'] = input_data['clean_text'].map(
+        lambda x: re.sub(r'\s+', ' ', x).strip().lower() if isinstance(x, str) else "")
 
     return input_data
 
@@ -66,7 +73,10 @@ def _convert_labels(input_data):
     # complete code below to convert "pos" and "neg"
     # to boolean values 1 and 0
     # ------------------------------------------------
-    input_data['Label'] =
+    input_data['Label'] = input_data['Label'].map({'pos': 1, 'neg': 0})
+
+    # invalid Label values
+    input_data['Label'] = input_data['Label'].fillna(0).astype(int)
 
     return input_data
 
@@ -95,8 +105,8 @@ def _map_tokens2index(input_data, top_K=500):
     # -----------------------------------------------------------
     # complete code to add index for padding (0) and unknown (1)
     # -----------------------------------------------------------
-    tokens2index['<pad>'] =
-    tokens2index['<unk>'] =
+    tokens2index['<pad>'] = 0
+    tokens2index['<unk>'] = 1
 
     # save tokens2index to json files
     with open('tokens2index.json', 'w') as outfile:
@@ -125,13 +135,32 @@ def _pad_truncate_seq(x, seq_len):
         # -----------------------------------------------------------
         # complete code to add padding "0" to the end of list of words
         # -----------------------------------------------------------
+        padding_len = seq_len - len(x)
+        return x + [0] * padding_len
 
 
 def main():
-    # Step 1: read raw data from files [to do]
-    train_data, test_data = _read_data()
+    parser = argparse.ArgumentParser(
+        description="Data preprocessing for LSTM"
+    )
+    parser.add_argument(
+        "--train",
+        type=str,
+        default="training_raw_data.csv",
+        help="Path to the raw training CSV file",
+    )
+    parser.add_argument(
+        "--test",
+        type=str,
+        default="test_raw_data.csv",
+        help="Path to the raw testing CSV file",
+    )
+    args = parser.parse_args()
 
-    # Step 2: clearning data and lower case
+    # Step 1: read raw data from files [to do]
+    train_data, test_data = _read_data(train_data_raw=args.train, test_data_raw=args.test)
+
+    # Step 2: cleaning data and lower case
     train_data = _data_preprocessing(train_data)
     test_data = _data_preprocessing(test_data)
 
@@ -163,12 +192,12 @@ def main():
     # step 7-1: train data padding
     train_data['input_x'] = train_data['input_x'].apply(
         lambda x: _pad_truncate_seq(x, batch_seq_len))
-    train_data.to_csv('training_data.csv', index=False)
+    train_data.to_csv('data/training_data.csv', index=False)
 
     # step 7-2: test data padding
     test_data['input_x'] = test_data['input_x'].apply(
         lambda x: _pad_truncate_seq(x, batch_seq_len))
-    test_data.to_csv('test_data.csv', index=False)
+    test_data.to_csv('data/test_data.csv', index=False)
 
 
 if __name__ == '__main__':
