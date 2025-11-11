@@ -34,13 +34,13 @@ def _save_checkpoint(ckp_path, model, epoches, optimizer):
 def main():
     wandb.init(
         project="Assignment 2",  # your project name
-        name="glove 300 embedding_dim Run",              # custom run name
+        name="200 embedding_dim Run",              # custom run name
         config={
             # Training parameters
             "batch_size": 250,
             "n_layers": 2,
             "input_len": 150,
-            "embedding_dim": 300,
+            "embedding_dim": 100,
             "hidden_dim": 25,
             "output_size": 1,
             "num_epochs": 15,
@@ -48,7 +48,7 @@ def main():
             "clip": 5,
             "load_cpt": False,
             "ckp_path": 'cpt/name.pt',
-            "pretrain": True
+            "pretrain": False
         }
     )
 	
@@ -98,7 +98,7 @@ def main():
     ## "embedding_dim" defined above shoud be aligned with the dimension of GloVe embedddings
     ## if you do not want bonus, you can skip it.
     ##-----------------------------------------------------------------------
-    glove_file = 'glove.6B/glove.6B.300d.txt' ## change by yourself
+    glove_file = 'glove.6B/glove.6B.200d.txt' ## change by yourself
     
 
     ## ---------------------------------------------------------
@@ -198,7 +198,7 @@ def main():
             ## step 9: complete code below to save checkpoint
             ##-----------------------------------------------
             print("**** save checkpoint ****")
-            ckp_path = f'checkpoint/step_{epoch}.pt'
+            ckp_path = f'checkpoint/step_{epoches}.pt'
             _save_checkpoint(ckp_path, model, epoches, optimizer)
             
     
@@ -223,12 +223,26 @@ def main():
    
     labels = torch.tensor(labels)
     preds = torch.tensor(preds)
+    
+    #Code to calculate and log metrics in WandB
     test_accy = sklearn.metrics.accuracy_score(preds, labels)
     test_recall = sklearn.metrics.recall_score(preds, labels, average='macro')
     test_precision = sklearn.metrics.precision_score(preds, labels, average='macro')
     test_f1 = sklearn.metrics.f1_score(preds, labels, average='macro')
     
     wandb.log({"Test Accuracy": test_accy, "Test Recall": test_recall, "Test Precision": test_precision, "Test F1": test_f1})
+       
+    #Code to create a Confusion Matrix of the testing results 
+    cm = sklearn.metrics.confusion_matrix(labels, preds, labels=[0,1])
+    
+    disp = sklearn.metrics.ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0,1])
+    disp.plot()
+    plt.title('Sentiment')
+    plt.show()
+
+    plt.savefig("confusion_matrix_100.png", dpi=300, bbox_inches='tight')
+    plt.close()
+    
 
 if __name__ == '__main__':
     time_start = time.time()
