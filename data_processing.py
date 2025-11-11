@@ -1,204 +1,155 @@
 import pandas as pd
 import re
 import json
-from collections import Counter
 import argparse
+from collections import Counter
 
 
-'''step 1: read the raw data'''
+# ============================================================
+# Step 1: Data loading
+# ============================================================
+
+def load_datasets(train_path: str, test_path: str):
+    def _read_csv(path):
+        try:
+            return pd.read_csv(path, encoding="utf-8")
+        except Exception as err:
+            print(f"Failed to read {path}: {err}")
+            raise
+
+    return _read_csv(train_path), _read_csv(test_path)
 
 
-def _read_data(train_data_raw: str, test_data_raw: str):
-    # -------------------------------------------
-    # read the training and test data from files
-    # *** complete the code below ***
-    # -------------------------------------------
-    try:
-        train_raw_data = pd.read_csv(train_data_raw, encoding='utf-8')
-    except Exception as e:
-        print("Error reading training_raw_data.csv:", e)
-        raise
+# ============================================================
+# Step 2: Data cleaning
+# ============================================================
 
-    try:
-        test_raw_data = pd.read_csv(test_data_raw, encoding='utf-8')
-    except Exception as e:
-        print("Error reading test_raw_data.csv:", e)
-        raise
+def clean_text(dataframe: pd.DataFrame):
+    # Remove punctuation and special characters
+    dataframe["clean_text"] = dataframe["Content"].apply(
+        lambda txt: re.sub(r"[^\w\s]", " ", txt) if isinstance(txt, str) else ""
+    )
 
-    return train_raw_data, test_raw_data
+    # Normalize spaces and lowercase all words
+    dataframe["clean_text"] = dataframe["clean_text"].apply(
+        lambda txt: re.sub(r"\s+", " ", txt).strip().lower() if isinstance(txt, str) else ""
+    )
+
+    return dataframe
 
 
-'''step 2: data preprocessing'''
+# ============================================================
+# Step 3: Analyze and filter sentence lengths
+# ============================================================
+
+def filter_by_sequence_length(df: pd.DataFrame, min_len: int = 100, max_len: int = 600):
+    # Compute statistics of text length and remove extreme cases
+    df["seq_words"] = df["clean_text"].apply(str.split)
+    df["seq_len"] = df["seq_words"].apply(len)
+
+    print(df["seq_len"].describe())
+
+    # Keep sequences within the specified range
+    df = df[(df["seq_len"] >= min_len) & (df["seq_len"] <= max_len)]
+    return df
 
 
-def _data_preprocessing(input_data):
-    input_data['clean_text'] = input_data['Content'].map(
-        lambda x: re.sub(r'[^\w\s]', ' ', x))
+# ============================================================
+# Step 4: Convert textual labels to numeric form
+# ============================================================
 
-    # ----------------------------------------------------
-    # complete code below to convert words to lower case
-    # ----------------------------------------------------
-    input_data['clean_text'] = input_data['clean_text'].map(
-        lambda x: re.sub(r'\s+', ' ', x).strip().lower() if isinstance(x, str) else "")
-
-    return input_data
-
-
-'''step 3: stats of length of sentences'''
+def encode_labels(df: pd.DataFrame):
+    """
+    'pos' -> 1
+    'neg' -> 0
+    """
+    df["Label"] = df["Label"].map({"pos": 1, "neg": 0}).fillna(0).astype(int)
+    return df
 
 
-def _stats_seq_len(input_data):
-    input_data['seq_words'] = input_data['clean_text'].apply(
-        lambda x: x.split())
-    input_data['seq_len'] = input_data['seq_words'].apply(lambda x: len(x))
-    # input_data['seq_len'].hist()
-    # plt.show()
-    print(input_data['seq_len'].describe())
+# ============================================================
+# Step 5: Build vocabulary and map tokens to indices
+# ============================================================
 
-    # remove short and long tokens
-    min_seq_len = 100
-    max_seq_len = 600
-    input_data = input_data[min_seq_len <= input_data['seq_len']]
-    input_data = input_data[input_data['seq_len'] <= max_seq_len]
+def build_token_index(df: pd.DataFrame, top_k: int = 500):
+    all_tokens = [word for seq in df["seq_words"] for word in seq]
+    token_freq = Counter(all_tokens)
+    most_common = token_freq.most_common(top_k)
 
-    return input_data
+    # start indexing from 2
+    # 0 for <pad> and 1 for <unk>
+    vocab = {token: idx + 2 for idx, (token, _) in enumerate(most_common)}
+    vocab.update({"<pad>": 0, "<unk>": 1})
 
+    with open("tokens2index.json", "w", encoding="utf-8") as f:
+        json.dump(vocab, f, indent=4)
 
-'''step 4: convert 'positive and negative' to labels 1 and 0'''
-
-
-def _convert_labels(input_data):
-
-    # ------------------------------------------------
-    # complete code below to convert "pos" and "neg"
-    # to boolean values 1 and 0
-    # ------------------------------------------------
-    input_data['Label'] = input_data['Label'].map({'pos': 1, 'neg': 0})
-
-    # invalid Label values
-    input_data['Label'] = input_data['Label'].fillna(0).astype(int)
-
-    return input_data
+    return vocab
 
 
-'''step 5: Tokenize: create Vocab to Index mapping dictionary'''
+# ============================================================
+# Step 6: Convert tokens in sentences to indices
+# ============================================================
+
+def tokens_to_indices(tokens, vocab):
+    return [vocab.get(word, 1) for word in tokens]
 
 
-def _map_tokens2index(input_data, top_K=500):
-    words = input_data['seq_words'].tolist()
-    tokens_list = []
-    for l in words:
-        tokens_list.extend(l)
+# ============================================================
+# Step 7: Pad or truncate sequences to fixed length
+# ============================================================
 
-    # count the frequency of words
-    count_tokens = Counter(tokens_list)
-
-    # dictionary = {words: count}
-    sorted_tokens = count_tokens.most_common(len(tokens_list))
-
-    # choose the top K tokens or all of them
-    tokens_top = sorted_tokens[:top_K]
-
-    # tokens to index staring from 2, index=0:<padding>, index=1:<unknown>
-    tokens2index = {w: i+2 for i, (w, c) in enumerate(tokens_top)}
-
-    # -----------------------------------------------------------
-    # complete code to add index for padding (0) and unknown (1)
-    # -----------------------------------------------------------
-    tokens2index['<pad>'] = 0
-    tokens2index['<unk>'] = 1
-
-    # save tokens2index to json files
-    with open('tokens2index.json', 'w') as outfile:
-        json.dump(tokens2index, outfile, indent=4)
-
-    return tokens2index
+def pad_or_truncate(seq, max_length: int):
+    if len(seq) >= max_length:
+        return seq[:max_length]
+    return seq + [0] * (max_length - len(seq))
 
 
-'''step 6, Tokenize: Encode the words in sentences to index'''
-
-
-def _encode_word2index(x, tokens2index):
-    # unknown words: index=1
-    input_tokens = [tokens2index.get(w, 1) for w in x]
-
-    return input_tokens
-
-
-'''step 7: padding or truncating sequence data'''
-
-
-def _pad_truncate_seq(x, seq_len):
-    if len(x) >= seq_len:
-        return x[:seq_len]
-    else:
-        # -----------------------------------------------------------
-        # complete code to add padding "0" to the end of list of words
-        # -----------------------------------------------------------
-        padding_len = seq_len - len(x)
-        return x + [0] * padding_len
-
+# ============================================================
+# Main preprocessing pipeline
+# ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Data preprocessing for LSTM"
-    )
-    parser.add_argument(
-        "--train",
-        type=str,
-        default="training_raw_data.csv",
-        help="Path to the raw training CSV file",
-    )
-    parser.add_argument(
-        "--test",
-        type=str,
-        default="test_raw_data.csv",
-        help="Path to the raw testing CSV file",
-    )
+    parser = argparse.ArgumentParser(description="Data preprocessing for LSTM")
+    parser.add_argument("--train", type=str, default="training_raw_data.csv", help="Path to training data CSV")
+    parser.add_argument("--test", type=str, default="test_raw_data.csv", help="Path to test data CSV")
     args = parser.parse_args()
 
-    # Step 1: read raw data from files [to do]
-    train_data, test_data = _read_data(train_data_raw=args.train, test_data_raw=args.test)
+    # Step 1: Load raw data
+    train_df, test_df = load_datasets(args.train, args.test)
 
-    # Step 2: cleaning data and lower case
-    train_data = _data_preprocessing(train_data)
-    test_data = _data_preprocessing(test_data)
+    # Step 2: Clean text
+    train_df = clean_text(train_df)
+    test_df = clean_text(test_df)
 
-    # Step 3: stats of length and remove short and long sentences [It is Done]
-    # ***** It is Done (do not modify it) *****
+    # Step 3: Length stats & filtering (do not modify)
     print("***please do not modify step 3 as it is Done!***")
-    train_data = _stats_seq_len(train_data)
-    test_data = _stats_seq_len(test_data)
+    train_df = filter_by_sequence_length(train_df)
+    test_df = filter_by_sequence_length(test_df)
 
-    # Step 4: convert to string labels to boolean 1 and 0 [to do]
-    train_data = _convert_labels(train_data)
-    test_data = _convert_labels(test_data)
-    # print("test", test_data['Label'][:20])
+    # Step 4: Encode labels
+    train_df = encode_labels(train_df)
+    test_df = encode_labels(test_df)
 
-    # step 5: Tokenize: create Vocab to Index mapping dictionary [to do]
-    top_K = 10000  # recommend 8000-10000 words
-    tokens2index = _map_tokens2index(train_data, top_K)
-    print("num of tokens", len(tokens2index))
+    # Step 5: Build vocabulary
+    vocab_size = 10000
+    vocab = build_token_index(train_df, vocab_size)
+    print("num of tokens", len(vocab))
 
-    # step 6: Encode the words in sentences to index [It is Done]
-    train_data['input_x'] = train_data['seq_words'].apply(
-        lambda x: _encode_word2index(x, tokens2index))
-    test_data['input_x'] = test_data['seq_words'].apply(
-        lambda x: _encode_word2index(x, tokens2index))
-    print(test_data['input_x'][:10])
+    # Step 6: Encode sequences
+    train_df["input_x"] = train_df["seq_words"].apply(lambda words: tokens_to_indices(words, vocab))
+    test_df["input_x"] = test_df["seq_words"].apply(lambda words: tokens_to_indices(words, vocab))
+    print(test_df["input_x"].head(10))
 
-    # step 7: padding or truncating sequence data, save results [to do]
-    batch_seq_len = 150  # recommend 150-300
-    # step 7-1: train data padding
-    train_data['input_x'] = train_data['input_x'].apply(
-        lambda x: _pad_truncate_seq(x, batch_seq_len))
-    train_data.to_csv('data/training_data.csv', index=False)
+    # Step 7: Pad or truncate
+    seq_length = 150
+    train_df["input_x"] = train_df["input_x"].apply(lambda seq: pad_or_truncate(seq, seq_length))
+    test_df["input_x"] = test_df["input_x"].apply(lambda seq: pad_or_truncate(seq, seq_length))
 
-    # step 7-2: test data padding
-    test_data['input_x'] = test_data['input_x'].apply(
-        lambda x: _pad_truncate_seq(x, batch_seq_len))
-    test_data.to_csv('data/test_data.csv', index=False)
+    # Save results
+    train_df.to_csv("data/training_data.csv", index=False)
+    test_df.to_csv("data/test_data.csv", index=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
